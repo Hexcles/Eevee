@@ -1,0 +1,14 @@
+Eevee is a local OI(and perhaps ACM in the future) judger for Linux.
+
+It is orignially designed to be used in Vulpix - the Online Judge, but
+tend to be standalone.
+
+Eevee contains two main parts:
+  1. caretaker - the program runner. A simple sandbox using setuid,
+                 chroot, setrlimit, etc.
+  2. comparer  - the result judger. A simple file comparer with OI style
+                 (ignoring blanks on the line end and file end).
+
+(More things are in plan.)
+
+Eevee is free software, written by Hexcles Ma (http://robotshell.org).
