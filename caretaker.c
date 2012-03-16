@@ -111,8 +111,9 @@ void print_usage() {
 		"  -o, --output=OUTPUT_FILENAME   the NAME of output file (should NOT exist!)\n"
 		"  -h, --help                     print this help\n\n"
 		"Output:\n"
-		"  1.not exceeded: WEXITSTATUS WIFEXITED TIME(ms) MEMORY(KB)\n"
-		"  2.exceeded: message\n");
+		"  1.exited: WEXITSTATUS TIME(ms) MEMORY(KB)\n"
+		"  2.killed: message\n"
+		"Notes: PROGRAM must be compiled statically!\n");
 	exit(EX_SUCCESS);
 }
 
@@ -235,21 +236,22 @@ int watch_prg(){
 			error(EX_INTER, 0, "Error chroot.");
 		chdir("/");
 		apply_rlimit(RLIMIT_CPU, (int) (timeLimit + 1000) / 1000);	//in seconds
-		apply_rlimit(RLIMIT_AS, (memoryLimit + 100) * 1024);		//in bytes
+		apply_rlimit(RLIMIT_AS, (memoryLimit + 10240) * 1024);		//in bytes
 		apply_rlimit(RLIMIT_NOFILE, 3);	//one greater than max file number permitted
 		setgid(child_gid);
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
 			error(EX_INTER, 0, "Error setting uid/gid.");
+		alarm((int) (timeLimit + 1000) / 1000);
 		execve(prgfileName, args, envs);
 		error(EX_INTER, 0, "Error executing.");
 	} else {
 		//parent process
-		wait4(RUSAGE_CHILDREN, &status, WUNTRACED, &usage);
-		if (WEXITSTATUS(status) == EX_INTER) return EX_FATAL;
+		wait3(&status, WUNTRACED, &usage);
+		if (WIFEXITED(status) && (WEXITSTATUS(status) == EX_INTER)) return EX_FATAL;
 		int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
 		long memory = usage.ru_minflt * (getpagesize() >> 10);
-		if (time > timeLimit) {
+		if ((time > timeLimit) || (WIFSIGNALED(status) && (WTERMSIG(status) == SIGALRM))) {
 			printf("Time Limit Exceeded\n");
 			return EX_TLE;
 		}
@@ -257,8 +259,10 @@ int watch_prg(){
 			printf("Memory Limit Exceeded\n");
 			return EX_MLE;
 		}
-		printf("%d %d %d %ld\n", WEXITSTATUS(status), WIFEXITED(status), time, memory);
-		if ((WEXITSTATUS(status) != 0) || !WIFEXITED(status)) return EX_RE;
+		if (WIFEXITED(status))
+			printf("%d %d %ld\n", WEXITSTATUS(status), time, memory);
+		else printf("Program Killed\n");
+		if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) return EX_RE;
 	}
 	return EX_SUCCESS;
 }
