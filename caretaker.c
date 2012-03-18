@@ -177,6 +177,7 @@ void init_env(){
 		error(EX_FATAL, 0, "Cannot find user 'nobody'.");
 	child_uid = nobody->pw_uid;
 	child_gid = nobody->pw_gid;
+	umask(0);
 	tmpdirName = mkdtemp(tmpdirTemplate);
 	if (tmpdirName == NULL)
 		error(EX_FATAL, 0, "Error create temp directory.");
@@ -237,7 +238,7 @@ int watch_prg(){
 		chdir("/");
 		apply_rlimit(RLIMIT_CPU, (int) (timeLimit + 1000) / 1000);	//in seconds
 		apply_rlimit(RLIMIT_AS, (memoryLimit + 10240) * 1024);		//in bytes
-		apply_rlimit(RLIMIT_NOFILE, 3);	//one greater than max file number permitted
+		apply_rlimit(RLIMIT_NOFILE, 5);	//one greater than max file number permitted
 		setgid(child_gid);
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
@@ -272,7 +273,7 @@ void clean_env(){
 	if (outfileName != NULL) {
 		char *tmppath = path_cat(tmpdirName, outfileName);
 		buffer = malloc(strlen(tmppath) + 10);
-		sprintf(buffer, "cp %s .", tmppath);
+		sprintf(buffer, "cp -p %s .", tmppath);
 		system(buffer);
 		free(tmppath);
 	} else buffer = malloc(strlen(tmpdirName) + 10);
