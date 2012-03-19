@@ -236,15 +236,21 @@ int watch_prg(){
 		if (chroot(tmpdirName) != 0)
 			error(EX_INTER, 0, "Error chroot.");
 		chdir("/");
+		int olderr = dup(STDERR_FILENO);
+		int null = open("/dev/null", O_WRONLY), zero = open("/dev/zero", O_RDONLY);
+		dup2(zero, STDIN_FILENO);
+		dup2(null, STDOUT_FILENO);
+		dup2(null, STDERR_FILENO);
 		apply_rlimit(RLIMIT_CPU, (int) (timeLimit + 1000) / 1000);	//in seconds
 		apply_rlimit(RLIMIT_AS, (memoryLimit + 10240) * 1024);		//in bytes
-		apply_rlimit(RLIMIT_NOFILE, 5);	//one greater than max file number permitted
+		apply_rlimit(RLIMIT_NOFILE, 10);	//one greater than max file number permitted
 		setgid(child_gid);
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
 			error(EX_INTER, 0, "Error setting uid/gid.");
 		alarm((int) (timeLimit + 1000) / 1000);
 		execve(prgfileName, args, envs);
+		dup2(olderr, STDERR_FILENO);
 		error(EX_INTER, 0, "Error executing.");
 	} else {
 		//parent process
