@@ -79,14 +79,16 @@ static const struct option longOpts[] = {
 /* global options and default values */
 char *program_invocation_name;
 char *infileName = NULL, *outfileName = NULL, *prgfileName = NULL;
-int timeLimit = 1000, memoryLimit = 131072, result = EX_SUCCESS;
+int timeLimit = 1000, memoryLimit = 131072, result = EX_SUCCESS, timeout_killed;
 
 uid_t parent_uid, child_uid;
 gid_t parent_gid, child_gid;
+pid_t child_pid;
 char tmpdirTemplate[] = "/tmp/EeveeTMP.XXXXXX", *tmpdirName;
 
 char *path_cat(const char *path, char *file);
 inline int tv2ms(struct timeval tv);
+void timeout();
 void print_usage();
 void apply_rlimit(int resource, int limit);
 void parse_opt(int argc, char * const argv[]);
@@ -95,7 +97,13 @@ int watch_prg();
 void clean_env();
 
 inline int tv2ms(struct timeval tv) {
-  return (int) (tv.tv_usec / 1000) + tv.tv_sec * 1000;
+	return (int) (tv.tv_usec / 1000) + tv.tv_sec * 1000;
+}
+
+void timeout() {
+	if (child_pid > 0) kill(child_pid, SIGKILL);
+	timeout_killed = 1;
+	alarm(0);
 }
 
 char *path_cat(const char *path, char *file) {
@@ -236,12 +244,12 @@ int watch_prg(){
 	int status;
 	struct rusage usage;
 	char *envs[] = { NULL }, *args[] = { prgfileName, NULL };
-	pid_t child = fork();
-	if (child == -1) {
+	child_pid = fork();
+	if (child_pid == -1) {
 		fprintf(stderr, "Error forking.\n");
 		return EX_FATAL;
 	}
-	if (child == 0) {
+	if (child_pid == 0) {
 		//child process
 		if (chroot(tmpdirName) != 0)
 			error(EX_INTER, 0, "Error chroot.");
@@ -258,17 +266,18 @@ int watch_prg(){
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
 			error(EX_INTER, 0, "Error setting uid/gid.");
-		alarm((int) (timeLimit + 1000) / 1000);
 		execve(prgfileName, args, envs);
 		dup2(olderr, STDERR_FILENO);
-		error(EX_INTER, 0, "Error executing.");
+		error(EX_INTER, 0, "Error executing(forgot to link statically?).");
 	} else {
 		//parent process
+		signal(SIGALRM, timeout);
+		alarm((int) (timeLimit + 2000) / 1000);
 		wait3(&status, WUNTRACED, &usage);
 		if (WIFEXITED(status) && (WEXITSTATUS(status) == EX_INTER)) return EX_FATAL;
 		int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
 		long memory = usage.ru_minflt * (getpagesize() >> 10);
-		if ((time > timeLimit) || (WIFSIGNALED(status) && (WTERMSIG(status) == SIGALRM))) {
+		if ((time > timeLimit) || timeout_killed) {
 			printf("Time Limit Exceeded\n");
 			return EX_TLE;
 		}
