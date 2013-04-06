@@ -6,6 +6,7 @@ tend to be standalone.
 Eevee contains two main parts:
   1. caretaker - the program runner. A simple sandbox using setuid,
                  chroot, setrlimit, etc.
+               - module for limiting system call added by LX(http://lix.li).
   2. comparer  - the result judger. A simple file comparer with OI style
                  (ignoring blanks on the line end and file end).
 
