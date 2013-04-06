@@ -240,6 +240,7 @@ void init_env(){
 	}
 }
 
+#include "syscall_listener.c"
 int watch_prg(){
 	int status;
 	struct rusage usage;
@@ -266,6 +267,7 @@ int watch_prg(){
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
 			error(EX_INTER, 0, "Error setting uid/gid.");
+    listen_me(); //init ptrace_me
 		execve(prgfileName, args, envs);
 		dup2(olderr, STDERR_FILENO);
 		error(EX_INTER, 0, "Error executing(forgot to link statically?).");
@@ -273,22 +275,33 @@ int watch_prg(){
 		//parent process
 		signal(SIGALRM, timeout);
 		alarm((int) (timeLimit + 2000) / 1000);
-		wait3(&status, WUNTRACED, &usage);
-		if (WIFEXITED(status) && (WEXITSTATUS(status) == EX_INTER)) return EX_FATAL;
-		int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
-		long memory = usage.ru_minflt * (getpagesize() >> 10);
-		if ((time > timeLimit) || timeout_killed) {
-			printf("Time Limit Exceeded\n");
-			return EX_TLE;
-		}
-		if (memory > memoryLimit) {
-			printf("Memory Limit Exceeded\n");
-			return EX_MLE;
-		}
-		if (WIFEXITED(status))
-			printf("%d %d %ld\n", WEXITSTATUS(status), time, memory);
-		else printf("Program Killed\n");
-		if (!WIFEXITED(status) || (WEXITSTATUS(status) != 0)) return EX_RE;
+    long memory_max = 0;
+    while(1) { //listening
+      wait3(&status, WUNTRACED, &usage);
+      int st = parse_status(status);
+      int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
+      long memory_now = usage.ru_minflt * (getpagesize() >> 10);
+      if (memory_now > memory_max)
+        memory_max = memory_now;
+      if ((time > timeLimit) || timeout_killed) {
+        printf("Time Limit Exceeded\n");
+        ptrace(PTRACE_KILL, child_pid, NULL, NULL);
+        return EX_TLE;
+      }
+      if (memory_max > memoryLimit) {
+        printf("Memory Limit Exceeded\n");
+        ptrace(PTRACE_KILL, child_pid, NULL, NULL);
+        return EX_MLE;
+      }
+      if (st >= 0) { //exited
+        printf("%d %dms %ldKiB\n", WEXITSTATUS(status), time, memory_max);
+        return st;
+      }
+      if (st == EX_YOYOCHECKNOW) { 
+        check_call(child_pid);
+      }
+      listen_again(child_pid);
+    }
 	}
 	return EX_SUCCESS;
 }
