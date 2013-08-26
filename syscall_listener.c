@@ -313,7 +313,11 @@ void listen_again(pid_t child_pid)
 
 void check_call(pid_t child_pid)
 {
+#ifdef __x86_64__
+  int id = ptrace(PTRACE_PEEKUSER, child_pid, (void*)(8*ORIG_RAX), NULL);
+#else
   int id = ptrace(PTRACE_PEEKUSER, child_pid, (void*)(4*ORIG_EAX), NULL);
+#endif
   if (id==-1)
     error(EX_INTER, 0, "Error peeking user");
   call_count[id]++; 
