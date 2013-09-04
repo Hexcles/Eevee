@@ -30,27 +30,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * exit code:
- *   0: success (both the runner and program)
- *   ---------------runner---------------
- *   1: invalid options/command line format error or file not exists
- *   2: internal fatal (chroot, setuid, etc.)
- *   (details in stderr)
- *   --------------program---------------
- *   251: Time Limit Exceeded
- *   252: Memory Limit Exceeded
- *   253: Runtime Error (with return code in stdout, if any)
- */
-
-#define EX_SUCCESS 0
-#define EX_ERROR 1
-#define EX_FATAL 2
-#define EX_INTER 250
-#define EX_TLE 251
-#define EX_MLE 252
-#define EX_RE 253
-
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -60,10 +39,16 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/time.h>
+#include <sys/ptrace.h>
 #include <sys/resource.h>
+
+#include "exit_code.h"
+#include "syscall_listener.h"
 
 /* option list */
 static const char *optString = "t:m:i:o:h";
@@ -240,7 +225,6 @@ void init_env(){
 	}
 }
 
-#include "syscall_listener.c"
 int watch_prg(){
 	int status;
 	struct rusage usage;
@@ -267,7 +251,7 @@ int watch_prg(){
 		setuid(child_uid);
 		if ((geteuid() != child_uid) || (getegid() != child_gid))
 			error(EX_INTER, 0, "Error setting uid/gid.");
-    listen_me(); //init ptrace_me
+		listen_me(); //init ptrace_me
 		execve(prgfileName, args, envs);
 		dup2(olderr, STDERR_FILENO);
 		error(EX_INTER, 0, "Error executing(forgot to link statically?).");
@@ -275,33 +259,33 @@ int watch_prg(){
 		//parent process
 		signal(SIGALRM, timeout);
 		alarm((int) (timeLimit + 2000) / 1000);
-    long memory_max = 0;
-    while(1) { //listening
-      wait3(&status, WUNTRACED, &usage);
-      int st = parse_status(status);
-      int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
-      long memory_now = usage.ru_minflt * (getpagesize() >> 10);
-      if (memory_now > memory_max)
-        memory_max = memory_now;
-      if ((time > timeLimit) || timeout_killed) {
-        printf("Time Limit Exceeded\n");
-        ptrace(PTRACE_KILL, child_pid, NULL, NULL);
-        return EX_TLE;
-      }
-      if (memory_max > memoryLimit) {
-        printf("Memory Limit Exceeded\n");
-        ptrace(PTRACE_KILL, child_pid, NULL, NULL);
-        return EX_MLE;
-      }
-      if (st >= 0) { //exited
-        printf("%d %dms %ldKiB\n", WEXITSTATUS(status), time, memory_max);
-        return st;
-      }
-      if (st == EX_YOYOCHECKNOW) { 
-        check_call(child_pid);
-      }
-      listen_again(child_pid);
-    }
+		long memory_max = 0;
+		while(1) { //listening
+			wait3(&status, WUNTRACED, &usage);
+			int st = parse_status(status);
+			int time = tv2ms(usage.ru_utime) + tv2ms(usage.ru_stime);
+			long memory_now = usage.ru_minflt * (getpagesize() >> 10);
+			if (memory_now > memory_max)
+				memory_max = memory_now;
+			if ((time > timeLimit) || timeout_killed) {
+				printf("Time Limit Exceeded\n");
+				ptrace(PTRACE_KILL, child_pid, NULL, NULL);
+				return EX_TLE;
+			}
+			if (memory_max > memoryLimit) {
+				printf("Memory Limit Exceeded\n");
+				ptrace(PTRACE_KILL, child_pid, NULL, NULL);
+				return EX_MLE;
+			}
+			if (st >= 0) { //exited
+				printf("%d %dms %ldKiB\n", WEXITSTATUS(status), time, memory_max);
+				return st;
+			}
+			if (st == EX_YOYOCHECKNOW) { 
+				check_call(child_pid);
+			}
+			listen_again(child_pid);
+		}
 	}
 	return EX_SUCCESS;
 }
